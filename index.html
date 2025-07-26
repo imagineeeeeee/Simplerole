@@ -45,7 +45,8 @@
     <script type="module">
         // Standardized all Firebase SDK versions to 11.6.1 for consistency
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        // Import OAuthProvider and signInWithCredential for Discord login integration with Firebase
+        import { getAuth, onAuthStateChanged, signOut, signInWithCredential, OAuthProvider } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, getDoc, setDoc, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // --- Global Variables (from Canvas environment or defaults) ---
@@ -60,7 +61,6 @@
         };
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
         // initialAuthToken is typically for internal Canvas testing, not for user-facing Discord auth
-        // Fixed: Correctly reference __initial_auth_token on the right-hand side
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null; 
 
         // --- Discord OAuth Credentials ---
@@ -82,7 +82,7 @@
         let discordAccessToken = null;
         let discordUser = null;
         let discordGuilds = [];
-        let firebaseUser = null; // This will be the Firebase user (anonymous)
+        let firebaseUser = null; // This will be the Firebase user (linked to Discord)
         let selectedGuildId = null;
         let currentMessage = ''; // For success/error messages
 
@@ -138,21 +138,40 @@
             if (user) {
                 firebaseUser = user;
                 console.log("Firebase user authenticated:", user.uid);
-                // If firebaseUser is present, and we don't have discordUser yet (e.g., page refresh after Discord login)
-                // we assume isAuthenticated and will try to fetch Discord data later if needed.
-                isAuthenticated = true; // Assume authenticated if Firebase user exists
+                isAuthenticated = true; // Firebase user exists, so consider authenticated
+
+                // If Discord details are not yet loaded (e.g., page refresh after Firebase auth)
+                if (!discordUser && discordAccessToken) {
+                    try {
+                        // Attempt to re-fetch Discord user and guilds using existing access token
+                        const userResponse = await fetch('https://discord.com/api/users/@me', {
+                            headers: { Authorization: `Bearer ${discordAccessToken}` },
+                        });
+                        const userData = await userResponse.json();
+                        discordUser = userData;
+
+                        const guildsResponse = await fetch('https://discord.com/api/users/@me/guilds', {
+                            headers: { Authorization: `Bearer ${discordAccessToken}` },
+                        });
+                        const guildsData = await guildsResponse.json();
+                        discordGuilds = guildsData.filter(guild => (guild.permissions & 0x8) === 0x8);
+                    } catch (error) {
+                        console.error("Error re-fetching Discord data on Firebase auth state change:", error);
+                        // If re-fetching fails, clear Discord specific data
+                        discordAccessToken = null;
+                        discordUser = null;
+                        discordGuilds = [];
+                        isAuthenticated = false; // Re-authenticate Discord if its data is lost
+                        showMessage("Failed to retrieve Discord data. Please log in with Discord again.", 'error');
+                    }
+                }
             } else {
                 firebaseUser = null;
                 isAuthenticated = false;
-                console.log("No Firebase user. Attempting anonymous sign-in.");
-                // If no Firebase user, try anonymous sign-in
-                try {
-                    await signInAnonymously(auth);
-                    console.log("Signed in anonymously to Firebase.");
-                } catch (error) {
-                    console.error("Error signing in anonymously:", error);
-                    showMessage(`Firebase anonymous login failed: ${error.message}. Please check Firebase Authentication settings.`, 'error');
-                }
+                discordAccessToken = null; // Clear Discord token if Firebase user logs out
+                discordUser = null;
+                discordGuilds = [];
+                console.log("No Firebase user. User needs to log in with Discord.");
             }
             isLoadingAuth = false; // Auth state is now known
             renderApp(); // Initial render after auth state is determined
@@ -169,7 +188,7 @@
                 renderApp(); // Show loading state
 
                 try {
-                    // Exchange code for token
+                    // 1. Exchange Discord code for token
                     const tokenResponse = await fetch('https://discord.com/api/oauth2/token', {
                         method: 'POST',
                         headers: {
@@ -194,7 +213,13 @@
                     const tokenData = await tokenResponse.json();
                     discordAccessToken = tokenData.access_token;
 
-                    // Fetch Discord user info
+                    // 2. Sign in to Firebase with Discord Access Token
+                    const credential = OAuthProvider.credentialWithToken('discord.com', discordAccessToken);
+                    const firebaseAuthResult = await signInWithCredential(auth, credential);
+                    firebaseUser = firebaseAuthResult.user;
+                    console.log("Firebase user signed in/linked via Discord:", firebaseUser.uid);
+
+                    // 3. Fetch Discord user info using the obtained access token
                     const userResponse = await fetch('https://discord.com/api/users/@me', {
                         headers: {
                             Authorization: `Bearer ${discordAccessToken}`,
@@ -203,7 +228,7 @@
                     const userData = await userResponse.json();
                     discordUser = userData; // Full Discord user object
 
-                    // Fetch Discord guilds (servers) using the Discord Access Token
+                    // 4. Fetch Discord guilds (servers) using the Discord Access Token
                     const guildsResponse = await fetch('https://discord.com/api/users/@me/guilds', {
                         headers: {
                             Authorization: `Bearer ${discordAccessToken}`,
@@ -225,13 +250,13 @@
                     }
 
                 } catch (error) {
-                    console.error('Discord OAuth error:', error);
+                    console.error('Discord OAuth or Firebase Sign-in error:', error);
                     isAuthenticated = false;
                     discordAccessToken = null;
                     discordUser = null;
                     discordGuilds = [];
-                    firebaseUser = null; // Ensure firebaseUser is null if Discord auth fails
-                    showMessage(`Discord login failed: ${error.message}. Please try again.`, 'error');
+                    firebaseUser = null; // Ensure firebaseUser is null if auth fails
+                    showMessage(`Login failed: ${error.message}. Please ensure Discord Sign-in is enabled in Firebase Console.`, 'error');
                 } finally {
                     isLoadingAuth = false;
                     renderApp(); // Re-render after auth process
@@ -324,8 +349,8 @@
                 return;
             }
             if (!firebaseUser) {
-                // Modified error message as anonymous sign-in is now the primary Firebase auth
-                serverSettingsState.error = "Firebase user session missing. Please ensure Firebase Anonymous Auth is enabled in Firebase Console.";
+                // Now Firebase user should be present after Discord login
+                serverSettingsState.error = "Firebase user session missing. Please log in with Discord to establish a Firebase session.";
                 serverSettingsState.loading = false;
                 renderApp();
                 return;
