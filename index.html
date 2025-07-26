@@ -44,7 +44,7 @@
     <!-- Firebase SDKs -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js";
+        import { getAuth, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js";
         import { getFirestore, doc, getDoc, setDoc, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
         // --- Global Variables (from Canvas environment or defaults) ---
@@ -128,7 +128,6 @@
                 // If no Firebase user, try anonymous sign-in if no custom token was provided
                 if (!initialAuthToken) {
                     try {
-                        await signInAnonymously(auth);
                         console.log("Signed in anonymously to Firebase.");
                     } catch (error) {
                         console.error("Error signing in anonymously:", error);
