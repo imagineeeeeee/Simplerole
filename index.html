@@ -76,12 +76,12 @@
         const db = getFirestore(firebaseApp);
 
         // --- Global State Variables ---
-        let isAuthenticated = false;
-        let isLoadingAuth = true;
+        let isAuthenticated = false; // Will be true only after successful Discord login
+        let isLoadingAuth = true; // Tracks initial Firebase auth state
         let discordAccessToken = null;
         let discordUser = null;
         let discordGuilds = [];
-        let firebaseUser = null; // This will be the Firebase user (anonymous)
+        let firebaseUser = null; // This will always be the Firebase user (anonymous or linked if Discord was a Firebase provider)
         let selectedGuildId = null;
         let currentMessage = ''; // For success/error messages
 
@@ -135,17 +135,11 @@
 
         // --- Firebase Authentication Listener ---
         onAuthStateChanged(auth, async (user) => {
-            if (user) {
-                firebaseUser = user;
-                console.log("Firebase user authenticated:", user.uid);
-                // If firebaseUser is present, and we don't have discordUser yet (e.g., page refresh after Discord login)
-                // we assume isAuthenticated and will try to fetch Discord data later if needed.
-                isAuthenticated = true; // Assume authenticated if Firebase user exists
-            } else {
-                firebaseUser = null;
-                isAuthenticated = false;
+            firebaseUser = user; // Always store the Firebase user object
+
+            if (!user) {
+                // If no Firebase user, attempt anonymous sign-in
                 console.log("No Firebase user. Attempting anonymous sign-in.");
-                // If no Firebase user, try anonymous sign-in
                 try {
                     await signInAnonymously(auth);
                     console.log("Signed in anonymously to Firebase.");
@@ -153,9 +147,26 @@
                     console.error("Error signing in anonymously:", error);
                     showMessage(`Firebase anonymous login failed: ${error.message}. Please check Firebase Authentication settings.`, 'error');
                 }
+                // After attempting anonymous sign-in, firebaseUser will be updated by a subsequent onAuthStateChanged call.
+                // For now, we remain in a loading state or show login if no Discord user.
+                isLoadingAuth = false; // Finished initial Firebase auth check
+                isAuthenticated = false; // Not Discord authenticated yet
+                renderApp();
+            } else {
+                console.log("Firebase user authenticated:", user.uid);
+                // If a Firebase user exists (could be anonymous from a previous session or just signed in)
+                // We need to check if Discord is also authenticated.
+                if (discordAccessToken && discordUser) {
+                    isAuthenticated = true; // Already have Discord session
+                } else {
+                    // Firebase user exists, but Discord session might not be active (e.g., page refresh).
+                    // We need to fetch Discord data if possible, or force Discord login.
+                    // For this requirement, `isAuthenticated` should remain false until Discord login.
+                    isAuthenticated = false;
+                }
+                isLoadingAuth = false; // Finished initial Firebase auth check
+                renderApp(); // Initial render after auth state is determined
             }
-            isLoadingAuth = false; // Auth state is now known
-            renderApp(); // Initial render after auth state is determined
         });
 
 
@@ -239,8 +250,9 @@
                     renderApp(); // Re-render after auth process
                 }
             } else {
-                isLoadingAuth = false; // No code, so not in auth flow, done loading auth
-                renderApp(); // Initial render if no code in URL
+                // If no 'code' in URL, it's a fresh load or direct access.
+                // We still need to wait for Firebase onAuthStateChanged to complete its check/anonymous sign-in.
+                // The initial render will be handled by onAuthStateChanged.
             }
         }
 
