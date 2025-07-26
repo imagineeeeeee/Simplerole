@@ -129,6 +129,9 @@
             discordGuilds = [];
             selectedGuildId = null;
             firebaseUser = null;
+            // Clear Discord data from session storage on logout
+            sessionStorage.removeItem('discordAccessToken');
+            sessionStorage.removeItem('discordUser');
             await signOut(auth); // Sign out from Firebase
             console.log("Logged out from Discord and Firebase.");
             renderApp(); // Re-render to show login screen
@@ -156,14 +159,22 @@
             } else {
                 console.log("Firebase user authenticated:", user.uid);
                 // If a Firebase user exists (could be anonymous from a previous session or just signed in)
-                // We need to check if Discord is also authenticated.
-                if (discordAccessToken && discordUser) {
-                    isAuthenticated = true; // Already have Discord session
+                // We need to check if Discord is also authenticated by checking session storage.
+                const storedAccessToken = sessionStorage.getItem('discordAccessToken');
+                const storedUser = sessionStorage.getItem('discordUser');
+
+                if (storedAccessToken && storedUser) {
+                    discordAccessToken = storedAccessToken;
+                    discordUser = JSON.parse(storedUser);
+                    isAuthenticated = true; // Discord session found in storage
+                    console.log("Discord session restored from storage.");
                 } else {
-                    // Firebase user exists, but Discord session might not be active (e.g., page refresh).
-                    // We need to fetch Discord data if possible, or force Discord login.
-                    // For this requirement, `isAuthenticated` should remain false until Discord login.
+                    // Firebase user exists, but Discord session not found in storage.
+                    // This means a fresh load or token expired/lost. Force Discord login.
                     isAuthenticated = false;
+                    discordAccessToken = null;
+                    discordUser = null;
+                    discordGuilds = [];
                 }
                 isLoadingAuth = false; // Finished initial Firebase auth check
                 renderApp(); // Initial render after auth state is determined
@@ -207,6 +218,8 @@
 
                     const tokenData = await tokenResponse.json();
                     discordAccessToken = tokenData.access_token;
+                    // Store access token in session storage
+                    sessionStorage.setItem('discordAccessToken', discordAccessToken);
 
                     // 2. Fetch Discord user info using the obtained access token
                     const userResponse = await fetch('https://discord.com/api/users/@me', {
@@ -217,6 +230,9 @@
                     const userData = await userResponse.json();
                     discordUser = userData; // Full Discord user object
                     console.log("Discord User Email:", discordUser.email); // Log Discord user's email
+                    // Store Discord user data in session storage
+                    sessionStorage.setItem('discordUser', JSON.stringify(discordUser));
+
 
                     // 3. Fetch Discord guilds (servers) using the Discord Access Token
                     const guildsResponse = await fetch('https://discord.com/api/users/@me/guilds', {
@@ -249,6 +265,9 @@
                     discordUser = null;
                     discordGuilds = [];
                     firebaseUser = null; // Ensure firebaseUser is null if Discord auth fails
+                    // Clear Discord data from session storage on error
+                    sessionStorage.removeItem('discordAccessToken');
+                    sessionStorage.removeItem('discordUser');
                     showMessage(`Discord login failed: ${error.message}. Please try again.`, 'error');
                 } finally {
                     isLoadingAuth = false;
@@ -400,6 +419,12 @@
             } catch (err) {
                 console.error("Error fetching guild data or settings:", err);
                 serverSettingsState.error = `Failed to load server settings: ${err.message}`;
+                // If a 401 occurs here, it means the token is invalid.
+                // We should clear the session and prompt for re-login.
+                if (err.message.includes('401')) {
+                    showMessage("Your Discord session has expired or is invalid. Please log in with Discord again.", 'error');
+                    logout(); // Force logout to clear state and prompt re-login
+                }
             } finally {
                 serverSettingsState.loading = false;
                 renderApp(); // Re-render with fetched data or error
