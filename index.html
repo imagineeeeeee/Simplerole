@@ -71,6 +71,12 @@
         const DISCORD_REDIRECT_URI = window.location.origin; // Dynamically set for Discord OAuth callback
         console.log("Application's Discord Redirect URI (from window.location.origin):", DISCORD_REDIRECT_URI); // Added for debugging
 
+        // --- Discord Bot Token ---
+        // WARNING: Embedding a bot token directly in client-side JavaScript is a security risk.
+        // In a production environment, API calls requiring a bot token should be proxied
+        // through a secure backend server to prevent exposure.
+        const DISCORD_BOT_TOKEN = "MTM5ODYxOTM5NTU1NDU0MTU2OQ.G2J2mq.WlvRLshao4gKfgTQUebL7D0xcq9nZyz4VjdiX0"; 
+
         // --- Firebase Initialization ---
         const firebaseApp = initializeApp(firebaseConfig);
         const auth = getAuth(firebaseApp);
@@ -111,7 +117,7 @@
                 // Perform Discord OAuth redirect
                 // Added 'email' scope to the request
                 const scope = encodeURIComponent('identify guilds email'); 
-                const discordAuthUrl = `https://discord.com/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&redirect_url=${encodeURIComponent(DISCORD_REDIRECT_URI)}&response_type=code&scope=${scope}`;
+                const discordAuthUrl = `https://discord.com/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&redirect_uri=${encodeURIComponent(DISCORD_REDIRECT_URI)}&response_type=code&scope=${scope}`;
                 window.location.href = discordAuthUrl;
 
             } catch (error) {
@@ -379,7 +385,7 @@
             }
 
             try {
-                // Fetch guild details (name)
+                // Fetch guild details (name) using USER ACCESS TOKEN
                 const guildResponse = await fetch(`https://discord.com/api/guilds/${guildId}`, {
                     headers: { Authorization: `Bearer ${discordAccessToken}` },
                 });
@@ -387,7 +393,7 @@
                 const guildData = await guildResponse.json();
                 serverSettingsState.guildName = guildData.name;
 
-                // Fetch roles
+                // Fetch roles using USER ACCESS TOKEN
                 const rolesResponse = await fetch(`https://discord.com/api/guilds/${guildId}/roles`, {
                     headers: { Authorization: `Bearer ${discordAccessToken}` },
                 });
@@ -396,9 +402,9 @@
                 // Filter out @everyone role and sort by position (higher position = higher role)
                 serverSettingsState.roles = rolesData.filter(role => role.id !== guildId).sort((a, b) => b.position - a.position);
 
-                // Fetch channels
+                // Fetch channels using BOT TOKEN
                 const channelsResponse = await fetch(`https://discord.com/api/guilds/${guildId}/channels`, {
-                    headers: { Authorization: `Bearer ${discordAccessToken}` },
+                    headers: { Authorization: `Bot ${DISCORD_BOT_TOKEN}` }, // Changed to Bot token
                 });
                 if (!channelsResponse.ok) throw new Error(`Failed to fetch channels: ${channelsResponse.status} ${channelsResponse.statusText}`);
                 const channelsData = await channelsResponse.json();
