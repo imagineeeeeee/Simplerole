@@ -202,8 +202,10 @@
                     const discordIdToken = tokenData.id_token; // Discord might provide an ID token
 
                     // 2. Sign in to Firebase with Discord Access Token
-                    // Corrected: Use OAuthProvider.credential() for creating the credential
-                    const credential = OAuthProvider.credential('discord.com', discordAccessToken, discordIdToken);
+                    // Corrected: Instantiate OAuthProvider and then call credential on the instance
+                    const providerInstance = new OAuthProvider('discord.com');
+                    const credential = providerInstance.credential({ accessToken: discordAccessToken, idToken: discordIdToken });
+                    
                     const firebaseAuthResult = await signInWithCredential(auth, credential);
                     firebaseUser = firebaseAuthResult.user;
                     console.log("Firebase user signed in/linked via Discord:", firebaseUser.uid);
