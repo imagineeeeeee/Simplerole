@@ -387,7 +387,7 @@
             try {
                 // Fetch guild details (name) using USER ACCESS TOKEN
                 const guildResponse = await fetch(`https://discord.com/api/guilds/${guildId}`, {
-                    headers: { Authorization: `Bearer ${DISCORD_BOT_TOKEN}` },
+                    headers: { Authorization: `Bearer ${secrets.<DISCORD_TOKEN>}` },
                 });
                 if (!guildResponse.ok) throw new Error(`Failed to fetch guild details: ${guildResponse.status} ${guildResponse.statusText}`);
                 const guildData = await guildResponse.json();
@@ -395,7 +395,7 @@
 
                 // Fetch roles using USER ACCESS TOKEN
                 const rolesResponse = await fetch(`https://discord.com/api/guilds/${guildId}/roles`, {
-                    headers: { Authorization: `Bearer ${DISCORD_BOT_TOKEN}` },
+                    headers: { Authorization: `Bearer ${secrets.<DISCORD_TOKEN>}` },
                 });
                 if (!rolesResponse.ok) throw new Error(`Failed to fetch roles: ${rolesResponse.status} ${rolesResponse.statusText}`);
                 const rolesData = await rolesResponse.json();
@@ -404,7 +404,7 @@
 
                 // Fetch channels using BOT TOKEN
                 const channelsResponse = await fetch(`https://discord.com/api/guilds/${guildId}/channels`, {
-                    headers: { Authorization: `Bot ${DISCORD_BOT_TOKEN}` }, // Changed to Bot token
+                    headers: { Authorization: `Bot ${secrets.<DISCORD_TOKEN>}` }, // Changed to Bot token
                 });
                 if (!channelsResponse.ok) throw new Error(`Failed to fetch channels: ${channelsResponse.status} ${channelsResponse.statusText}`);
                 const channelsData = await channelsResponse.json();
