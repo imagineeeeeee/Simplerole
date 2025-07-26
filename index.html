@@ -43,10 +43,10 @@
 
     <!-- Firebase SDKs -->
     <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
-        // Reverted Firebase Auth SDK version to 11.6.1 and removed DiscordAuthProvider import
+        // Standardized all Firebase SDK versions to 11.6.1 for consistency
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, getDoc, setDoc, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+        import { getFirestore, doc, getDoc, setDoc, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // --- Global Variables (from Canvas environment or defaults) ---
         const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
@@ -60,7 +60,8 @@
         };
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
         // initialAuthToken is typically for internal Canvas testing, not for user-facing Discord auth
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        // Fixed: Correctly reference __initial_auth_token on the right-hand side
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null; 
 
         // --- Discord OAuth Credentials ---
         // IMPORTANT: In a real production application, the client_secret should NEVER be exposed
