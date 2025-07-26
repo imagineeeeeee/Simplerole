@@ -241,6 +241,7 @@
 
 
                     // 3. Fetch Discord guilds (servers) using the Discord Access Token
+                    // This call will still be direct to Discord as it's for user's guilds
                     const guildsResponse = await fetch('https://discord.com/api/users/@me/guilds', {
                         headers: {
                             Authorization: `Bearer ${discordAccessToken}`,
@@ -382,25 +383,32 @@
             }
 
             try {
-                // Fetch guild details (name) using USER ACCESS TOKEN
-                const guildResponse = await fetch(`https://discord.com/api/guilds/${guildId}`, {
-                    headers: { Authorization: `Bearer ${discordAccessToken}` },
+                // Fetch guild details (name) using USER ACCESS TOKEN via Backend Proxy
+                const guildDetailsResponse = await fetch(`${BACKEND_URL}/api/guilds/${guildId}/details`, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-User-Authorization': `Bearer ${discordAccessToken}` // Pass user token securely
+                    }
                 });
-                if (!guildResponse.ok) throw new Error(`Failed to fetch guild details: ${guildResponse.status} ${guildResponse.statusText}`);
-                const guildData = await guildResponse.json();
+                if (!guildDetailsResponse.ok) throw new Error(`Failed to fetch guild details from backend: ${guildDetailsResponse.status} ${guildDetailsResponse.statusText}`);
+                const guildData = await guildDetailsResponse.json();
                 serverSettingsState.guildName = guildData.name;
 
-                // Fetch roles using USER ACCESS TOKEN
-                const rolesResponse = await fetch(`https://discord.com/api/guilds/${guildId}/roles`, {
-                    headers: { Authorization: `Bearer ${discordAccessToken}` },
+                // Fetch roles using USER ACCESS TOKEN via Backend Proxy
+                const rolesResponse = await fetch(`${BACKEND_URL}/api/guilds/${guildId}/roles`, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-User-Authorization': `Bearer ${discordAccessToken}` // Pass user token securely
+                    }
                 });
-                if (!rolesResponse.ok) throw new Error(`Failed to fetch roles: ${rolesResponse.status} ${rolesResponse.statusText}`);
+                if (!rolesResponse.ok) throw new Error(`Failed to fetch roles from backend: ${rolesResponse.status} ${rolesResponse.statusText}`);
                 const rolesData = await rolesResponse.json();
                 // Filter out @everyone role and sort by position (higher position = higher role)
                 serverSettingsState.roles = rolesData.filter(role => role.id !== guildId).sort((a, b) => b.position - a.position);
 
-                // Fetch channels using BOT TOKEN via your Backend Proxy
-                // The frontend now calls YOUR backend, which then uses the bot token to talk to Discord.
+                // Fetch channels using BOT TOKEN via your Backend Proxy (already implemented)
                 const channelsResponse = await fetch(`${BACKEND_URL}/api/guilds/${guildId}/channels`, {
                     method: 'GET',
                     headers: {
