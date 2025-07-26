@@ -44,7 +44,7 @@
     <!-- Firebase SDKs -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
-        import { getAuth, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js";
         import { getFirestore, doc, getDoc, setDoc, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
         // --- Global Variables (from Canvas environment or defaults) ---
@@ -122,17 +122,11 @@
         onAuthStateChanged(auth, async (user) => {
             if (user) {
                 firebaseUser = user;
-                // If we have a Firebase user, we can consider auth ready for Firestore
+                console.log("Firebase user authenticated:", user.uid);
             } else {
                 firebaseUser = null;
-                // If no Firebase user, try anonymous sign-in if no custom token was provided
-                if (!initialAuthToken) {
-                    try {
-                        console.log("Signed in anonymously to Firebase.");
-                    } catch (error) {
-                        console.error("Error signing in anonymously:", error);
-                    }
-                }
+                console.log("No Firebase user. Expecting Discord login to provide authentication.");
+                // Removed signInAnonymously as it is no longer needed.
             }
             isLoadingAuth = false; // Auth state is now known
             renderApp(); // Initial render after auth state is determined
@@ -308,8 +302,21 @@
             serverSettingsState.successMessage = '';
             renderApp(); // Show loading state
 
-            if (!discordAccessToken || !guildId || !firebaseUser) {
-                serverSettingsState.error = "Authentication or guild information missing.";
+            if (!discordAccessToken) {
+                serverSettingsState.error = "Discord authentication missing. Please log in with Discord.";
+                serverSettingsState.loading = false;
+                renderApp();
+                return;
+            }
+            if (!firebaseUser) {
+                // Modified error message as anonymous sign-in is removed
+                serverSettingsState.error = "Firebase user session missing. Please log in with Discord to establish a session.";
+                serverSettingsState.loading = false;
+                renderApp();
+                return;
+            }
+            if (!guildId) {
+                serverSettingsState.error = "Guild ID missing. Cannot fetch server settings.";
                 serverSettingsState.loading = false;
                 renderApp();
                 return;
