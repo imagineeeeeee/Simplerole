@@ -44,7 +44,8 @@
     <!-- Firebase SDKs -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
-        import { getAuth, signInWithPopup, DiscordAuthProvider, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js";
+        // Reverted Firebase Auth SDK version to 11.6.1 and removed DiscordAuthProvider import
+        import { getAuth, signInAnonymously, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, getDoc, setDoc, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
         // --- Global Variables (from Canvas environment or defaults) ---
@@ -61,30 +62,26 @@
         // initialAuthToken is typically for internal Canvas testing, not for user-facing Discord auth
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
-        // --- Discord OAuth Credentials (for Firebase Discord Provider) ---
-        // These are only needed if you're using Firebase's own DiscordAuthProvider.
-        // The Client ID and Secret are configured directly in Firebase Console for this provider.
-        const DISCORD_CLIENT_ID = "1398619395554541569"; // Your Discord Application ID (used for bot invite link)
-        // DISCORD_CLIENT_SECRET is NOT used client-side with Firebase's DiscordAuthProvider.
-        // It's configured in the Firebase Console under Authentication -> Sign-in method -> Discord.
+        // --- Discord OAuth Credentials ---
+        // IMPORTANT: In a real production application, the client_secret should NEVER be exposed
+        // client-side. It should only be used on a secure backend server to exchange the OAuth code
+        // for an access token. For this example, it's included client-side as requested.
+        const DISCORD_CLIENT_ID = "1398619395554541569"; // Your Discord Application ID
+        const DISCORD_CLIENT_SECRET = "StKCtOS56S_Icn-797Paa7Fspm7OTf5H"; // Your Discord Client Secret
         const DISCORD_REDIRECT_URI = window.location.origin; // Dynamically set for Discord OAuth callback
 
         // --- Firebase Initialization ---
         const firebaseApp = initializeApp(firebaseConfig);
         const auth = getAuth(firebaseApp);
         const db = getFirestore(firebaseApp);
-        const discordProvider = new DiscordAuthProvider();
-        // Request 'guilds' scope for Firebase Discord Auth Provider to get user's guilds
-        discordProvider.addScope('guilds');
-        discordProvider.addScope('identify'); // To get user's basic info
 
         // --- Global State Variables ---
         let isAuthenticated = false;
         let isLoadingAuth = true;
-        let discordAccessToken = null; // This will now come from Firebase's auth result
+        let discordAccessToken = null;
         let discordUser = null;
         let discordGuilds = [];
-        let firebaseUser = null; // This will be the Firebase user linked to Discord
+        let firebaseUser = null; // This will be the Firebase user (anonymous)
         let selectedGuildId = null;
         let currentMessage = ''; // For success/error messages
 
@@ -104,62 +101,22 @@
             renderApp();
         }
 
-        // --- Discord OAuth Functions (via Firebase) ---
+        // --- Discord OAuth Functions ---
         const loginWithDiscord = async () => {
             isLoadingAuth = true;
             renderApp(); // Show loading state
 
             try {
-                const result = await signInWithPopup(auth, discordProvider);
-                // The signed-in user info.
-                firebaseUser = result.user;
-                console.log("Firebase user signed in via Discord:", firebaseUser.uid);
-
-                // This gives you a Discord Access Token. You can use it to access the Discord API.
-                const credential = DiscordAuthProvider.credentialFromResult(result);
-                discordAccessToken = credential.accessToken;
-
-                // Fetch Discord user info directly from Firebase auth result
-                // Note: Firebase's user object might not contain all Discord user details directly.
-                // We'll use the accessToken to fetch full details if needed.
-                const userResponse = await fetch('https://discord.com/api/users/@me', {
-                    headers: {
-                        Authorization: `Bearer ${discordAccessToken}`,
-                    },
-                });
-                const userData = await userResponse.json();
-                discordUser = userData; // Full Discord user object
-
-                // Fetch Discord guilds (servers) using the Discord Access Token
-                const guildsResponse = await fetch('https://discord.com/api/users/@me/guilds', {
-                    headers: {
-                        Authorization: `Bearer ${discordAccessToken}`,
-                    },
-                });
-                const guildsData = await guildsResponse.json();
-                // Filter for guilds where the user has administrator permission (bit 3 = 0x8)
-                discordGuilds = guildsData.filter(guild => (guild.permissions & 0x8) === 0x8);
-
-                isAuthenticated = true;
-
-                // Check for guild_id in URL for direct server settings access
-                const params = new URLSearchParams(window.location.search);
-                const guildIdFromUrl = params.get('guild_id');
-                if (guildIdFromUrl) {
-                    selectedGuildId = guildIdFromUrl;
-                }
+                // Perform Discord OAuth redirect
+                const scope = encodeURIComponent('identify guilds'); // Request user info and guild list
+                const discordAuthUrl = `https://discord.com/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&redirect_uri=${encodeURIComponent(DISCORD_REDIRECT_URI)}&response_type=code&scope=${scope}`;
+                window.location.href = discordAuthUrl;
 
             } catch (error) {
-                console.error('Firebase Discord OAuth error:', error);
-                isAuthenticated = false;
-                discordAccessToken = null;
-                discordUser = null;
-                discordGuilds = [];
-                firebaseUser = null;
-                showMessage(`Login failed: ${error.message}`, 'error');
-            } finally {
+                console.error('Discord OAuth initiation error:', error);
+                showMessage(`Login initiation failed: ${error.message}`, 'error');
                 isLoadingAuth = false;
-                renderApp(); // Re-render after auth process
+                renderApp();
             }
         };
 
@@ -180,30 +137,109 @@
             if (user) {
                 firebaseUser = user;
                 console.log("Firebase user authenticated:", user.uid);
-
-                // If user is already authenticated via Firebase, try to get Discord details
-                // This handles cases where the page is refreshed after Discord login.
-                if (!discordUser && firebaseUser.providerData.length > 0) {
-                    const discordProviderData = firebaseUser.providerData.find(p => p.providerId === 'discord.com');
-                    if (discordProviderData) {
-                        // Re-fetch Discord token and user/guilds if Firebase user is from Discord
-                        // This might require a refresh token or re-auth if access token expired.
-                        // For simplicity, we'll rely on the full login flow for now.
-                        // A more robust solution would involve checking token expiration and refreshing.
-                        console.log("Firebase user from Discord, but Discord details not yet loaded. Please re-login if issues persist.");
-                        // For now, if firebaseUser is present, assume isAuthenticated and try to fetch guilds on selection
-                        isAuthenticated = true;
-                    }
-                }
+                // If firebaseUser is present, and we don't have discordUser yet (e.g., page refresh after Discord login)
+                // we assume isAuthenticated and will try to fetch Discord data later if needed.
+                isAuthenticated = true; // Assume authenticated if Firebase user exists
             } else {
                 firebaseUser = null;
                 isAuthenticated = false;
-                console.log("No Firebase user. User needs to log in with Discord.");
+                console.log("No Firebase user. Attempting anonymous sign-in.");
+                // If no Firebase user, try anonymous sign-in
+                try {
+                    await signInAnonymously(auth);
+                    console.log("Signed in anonymously to Firebase.");
+                } catch (error) {
+                    console.error("Error signing in anonymously:", error);
+                    showMessage(`Firebase anonymous login failed: ${error.message}. Please check Firebase Authentication settings.`, 'error');
+                }
             }
             isLoadingAuth = false; // Auth state is now known
             renderApp(); // Initial render after auth state is determined
         });
 
+
+        // --- Discord OAuth Callback Handler ---
+        async function handleDiscordAuthCallback() {
+            const params = new URLSearchParams(window.location.search);
+            const code = params.get('code');
+
+            if (code) {
+                isLoadingAuth = true;
+                renderApp(); // Show loading state
+
+                try {
+                    // Exchange code for token
+                    const tokenResponse = await fetch('https://discord.com/api/oauth2/token', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                        },
+                        body: new URLSearchParams({
+                            client_id: DISCORD_CLIENT_ID,
+                            client_secret: DISCORD_CLIENT_SECRET,
+                            grant_type: 'authorization_code',
+                            code: code,
+                            redirect_uri: DISCORD_REDIRECT_URI,
+                            scope: 'identify guilds',
+                        }).toString(),
+                    });
+
+                    if (!tokenResponse.ok) {
+                        const errorData = await tokenResponse.json();
+                        console.error('Failed to exchange Discord code for token:', errorData);
+                        throw new Error('Failed to exchange Discord code for token');
+                    }
+
+                    const tokenData = await tokenResponse.json();
+                    discordAccessToken = tokenData.access_token;
+
+                    // Fetch Discord user info
+                    const userResponse = await fetch('https://discord.com/api/users/@me', {
+                        headers: {
+                            Authorization: `Bearer ${discordAccessToken}`,
+                        },
+                    });
+                    const userData = await userResponse.json();
+                    discordUser = userData; // Full Discord user object
+
+                    // Fetch Discord guilds (servers) using the Discord Access Token
+                    const guildsResponse = await fetch('https://discord.com/api/users/@me/guilds', {
+                        headers: {
+                            Authorization: `Bearer ${discordAccessToken}`,
+                        },
+                    });
+                    const guildsData = await guildsResponse.json();
+                    // Filter for guilds where the user has administrator permission (bit 3 = 0x8)
+                    discordGuilds = guildsData.filter(guild => (guild.permissions & 0x8) === 0x8);
+
+                    isAuthenticated = true;
+
+                    // Clean up URL parameters
+                    window.history.replaceState({}, document.title, window.location.pathname);
+
+                    // Check for guild_id in URL for direct server settings access
+                    const guildIdFromUrl = params.get('guild_id');
+                    if (guildIdFromUrl) {
+                        selectedGuildId = guildIdFromUrl;
+                    }
+
+                } catch (error) {
+                    console.error('Discord OAuth error:', error);
+                    isAuthenticated = false;
+                    discordAccessToken = null;
+                    discordUser = null;
+                    discordGuilds = [];
+                    firebaseUser = null; // Ensure firebaseUser is null if Discord auth fails
+                    showMessage(`Discord login failed: ${error.message}. Please try again.`, 'error');
+                } finally {
+                    isLoadingAuth = false;
+                    renderApp(); // Re-render after auth process
+                }
+            } else {
+                isLoadingAuth = false; // No code, so not in auth flow, done loading auth
+                renderApp(); // Initial render if no code in URL
+            }
+        }
 
         // --- Dashboard View Rendering ---
         function renderDashboard() {
@@ -287,7 +323,8 @@
                 return;
             }
             if (!firebaseUser) {
-                serverSettingsState.error = "Firebase user session missing. Please log in with Discord to establish a Firebase session.";
+                // Modified error message as anonymous sign-in is now the primary Firebase auth
+                serverSettingsState.error = "Firebase user session missing. Please ensure Firebase Anonymous Auth is enabled in Firebase Console.";
                 serverSettingsState.loading = false;
                 renderApp();
                 return;
