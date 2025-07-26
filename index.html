@@ -7,7 +7,7 @@
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Google Fonts - Inter -->
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
         /* Custom scrollbar for role selection */
         .custom-scrollbar::-webkit-scrollbar {
@@ -63,18 +63,16 @@
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null; 
 
         // --- Discord OAuth Credentials ---
-        // IMPORTANT: In a real production application, the client_secret should NEVER be exposed
-        // client-side. It should only be used on a secure backend server to exchange the OAuth code
-        // for an access token. For this example, it's included client-side as requested.
         const DISCORD_CLIENT_ID = "1398619395554541569"; // Your Discord Application ID
         const DISCORD_CLIENT_SECRET = "StKCtOS56S_Icn-797Paa7Fspm7OTf5H"; // Your Discord Client Secret
         const DISCORD_REDIRECT_URI = window.location.origin; // Dynamically set for Discord OAuth callback
         console.log("Application's Discord Redirect URI (from window.location.origin):", DISCORD_REDIRECT_URI); // Added for debugging
 
-        // --- Discord Bot Token ---
-        // WARNING: Embedding a bot token directly in client-side JavaScript is a security risk.
-        // In a production environment, API calls requiring a bot token should be proxied
-        // through a secure backend server to prevent exposure.
+        // --- Backend Proxy URL ---
+        // IMPORTANT: Replace this with the URL where your backend server is deployed.
+        // During local development, this might be 'http://localhost:5000' (for Python Flask)
+        const BACKEND_URL = 'http://localhost:5000'; 
+        console.log("Backend Proxy URL:", BACKEND_URL);
 
         // --- Firebase Initialization ---
         const firebaseApp = initializeApp(firebaseConfig);
@@ -116,7 +114,7 @@
                 // Perform Discord OAuth redirect
                 // Added 'email' scope to the request
                 const scope = encodeURIComponent('identify guilds email'); 
-                const discordAuthUrl = `https://discord.com/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&redirect_url=${encodeURIComponent(DISCORD_REDIRECT_URI)}&response_type=code&scope=${scope}`;
+                const discordAuthUrl = `https://discord.com/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&redirect_uri=${encodeURIComponent(DISCORD_REDIRECT_URI)}&response_type=code&scope=${scope}`;
                 window.location.href = discordAuthUrl;
 
             } catch (error) {
@@ -386,7 +384,7 @@
             try {
                 // Fetch guild details (name) using USER ACCESS TOKEN
                 const guildResponse = await fetch(`https://discord.com/api/guilds/${guildId}`, {
-                    headers: { Authorization: `Bearer ${{ env.DISCORD_BOT_TOKEN }}` },
+                    headers: { Authorization: `Bearer ${discordAccessToken}` },
                 });
                 if (!guildResponse.ok) throw new Error(`Failed to fetch guild details: ${guildResponse.status} ${guildResponse.statusText}`);
                 const guildData = await guildResponse.json();
@@ -394,18 +392,22 @@
 
                 // Fetch roles using USER ACCESS TOKEN
                 const rolesResponse = await fetch(`https://discord.com/api/guilds/${guildId}/roles`, {
-                    headers: { Authorization: `Bearer ${{ env.DISCORD_BOT_TOKEN }}` },
+                    headers: { Authorization: `Bearer ${discordAccessToken}` },
                 });
                 if (!rolesResponse.ok) throw new Error(`Failed to fetch roles: ${rolesResponse.status} ${rolesResponse.statusText}`);
                 const rolesData = await rolesResponse.json();
                 // Filter out @everyone role and sort by position (higher position = higher role)
                 serverSettingsState.roles = rolesData.filter(role => role.id !== guildId).sort((a, b) => b.position - a.position);
 
-                // Fetch channels using BOT TOKEN
-                const channelsResponse = await fetch(`https://discord.com/api/guilds/${guildId}/channels`, {
-                    headers: { Authorization: `Bot ${{ env.DISCORD_BOT_TOKEN }}` }, // Changed to Bot token
+                // Fetch channels using BOT TOKEN via your Backend Proxy
+                // The frontend now calls YOUR backend, which then uses the bot token to talk to Discord.
+                const channelsResponse = await fetch(`${BACKEND_URL}/api/guilds/${guildId}/channels`, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
                 });
-                if (!channelsResponse.ok) throw new Error(`Failed to fetch channels: ${channelsResponse.status} ${channelsResponse.statusText}`);
+                if (!channelsResponse.ok) throw new Error(`Failed to fetch channels from backend: ${channelsResponse.status} ${channelsResponse.statusText}`);
                 const channelsData = await channelsResponse.json();
                 // Filter for text channels (type 0)
                 serverSettingsState.channels = channelsData.filter(channel => channel.type === 0);
