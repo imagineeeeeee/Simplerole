@@ -79,6 +79,7 @@
         const discordOAuthProvider = new OAuthProvider('discord.com');
         discordOAuthProvider.addScope('guilds'); // Request user's guilds
         discordOAuthProvider.addScope('identify'); // Request user's basic info
+        discordOAuthProvider.addScope('email'); // NEW: Request email scope
 
         // --- Global State Variables ---
         let isAuthenticated = false;
@@ -117,6 +118,7 @@
                 
                 firebaseUser = result.user;
                 console.log("Firebase user signed in via Discord:", firebaseUser.uid);
+                console.log("Firebase user email:", firebaseUser.email); // Log email
 
                 // Get the Discord access token from the Firebase Auth result
                 // This is the token Firebase itself obtained from Discord.
@@ -182,6 +184,7 @@
             if (user) {
                 firebaseUser = user;
                 console.log("Firebase user authenticated:", user.uid);
+                console.log("Firebase user email (on refresh):", firebaseUser.email); // Log email on refresh
                 isAuthenticated = true; // Firebase user exists, so consider authenticated
 
                 // If Discord details are not yet loaded (e.g., page refresh after Firebase auth)
@@ -612,6 +615,7 @@
                             ${discordUser ? `
                                 <span class="text-gray-300 mr-4 text-lg">
                                     Welcome, ${discordUser.username}#${discordUser.discriminator}
+                                    ${firebaseUser && firebaseUser.email ? ` (${firebaseUser.email})` : ''}
                                 </span>
                             ` : ''}
                             <button id="logoutButton"
