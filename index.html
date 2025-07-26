@@ -383,24 +383,22 @@
             }
 
             try {
-                // Fetch guild details (name) using USER ACCESS TOKEN via Backend Proxy
+                // Fetch guild details (name) using BOT TOKEN via Backend Proxy
                 const guildDetailsResponse = await fetch(`${BACKEND_URL}/api/guilds/${guildId}/details`, {
                     method: 'GET',
                     headers: {
-                        'Content-Type': 'application/json',
-                        'X-User-Authorization': `Bearer ${discordAccessToken}` // Pass user token securely
+                        'Content-Type': 'application/json'
                     }
                 });
                 if (!guildDetailsResponse.ok) throw new Error(`Failed to fetch guild details from backend: ${guildDetailsResponse.status} ${guildDetailsResponse.statusText}`);
                 const guildData = await guildDetailsResponse.json();
                 serverSettingsState.guildName = guildData.name;
 
-                // Fetch roles using USER ACCESS TOKEN via Backend Proxy
+                // Fetch roles using BOT TOKEN via Backend Proxy
                 const rolesResponse = await fetch(`${BACKEND_URL}/api/guilds/${guildId}/roles`, {
                     method: 'GET',
                     headers: {
-                        'Content-Type': 'application/json',
-                        'X-User-Authorization': `Bearer ${discordAccessToken}` // Pass user token securely
+                        'Content-Type': 'application/json'
                     }
                 });
                 if (!rolesResponse.ok) throw new Error(`Failed to fetch roles from backend: ${rolesResponse.status} ${rolesResponse.statusText}`);
