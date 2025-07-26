@@ -69,7 +69,7 @@
         const DISCORD_CLIENT_ID = "1398619395554541569"; // Your Discord Application ID
         const DISCORD_CLIENT_SECRET = "StKCtOS56S_Icn-797Paa7Fspm7OTf5H"; // Your Discord Client Secret
         const DISCORD_REDIRECT_URI = window.location.origin; // Dynamically set for Discord OAuth callback
-        console.log("Application's Discord Redirect URI:", DISCORD_REDIRECT_URI); // Added for debugging
+        console.log("Application's Discord Redirect URI (from window.location.origin):", DISCORD_REDIRECT_URI); // Added for debugging
 
         // --- Firebase Initialization ---
         const firebaseApp = initializeApp(firebaseConfig);
@@ -111,7 +111,7 @@
                 // Perform Discord OAuth redirect
                 // Added 'email' scope to the request
                 const scope = encodeURIComponent('identify guilds email'); 
-                const discordAuthUrl = `https://discord.com/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&redirect_url=${encodeURIComponent(DISCORD_REDIRECT_URI)}&response_type=code&scope=${scope}`;
+                const discordAuthUrl = `https://discord.com/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&redirect_uri=${encodeURIComponent(DISCORD_REDIRECT_URI)}&response_type=code&scope=${scope}`;
                 window.location.href = discordAuthUrl;
 
             } catch (error) {
@@ -192,21 +192,24 @@
                 renderApp(); // Show loading state
 
                 try {
+                    const requestBody = new URLSearchParams({
+                        client_id: DISCORD_CLIENT_ID,
+                        client_secret: DISCORD_CLIENT_SECRET,
+                        grant_type: 'authorization_code',
+                        code: code,
+                        redirect_uri: DISCORD_REDIRECT_URI,
+                        scope: 'identify guilds email', 
+                    }).toString();
+
+                    console.log("Discord Token Exchange Request Body:", requestBody); // Log the request body
+
                     // 1. Exchange Discord code for token
                     const tokenResponse = await fetch('https://discord.com/api/oauth2/token', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/x-www-form-urlencoded',
                         },
-                        body: new URLSearchParams({
-                            client_id: DISCORD_CLIENT_ID,
-                            client_secret: DISCORD_CLIENT_SECRET,
-                            grant_type: 'authorization_code',
-                            code: code,
-                            redirect_uri: DISCORD_REDIRECT_URI,
-                            // Ensure 'email' scope is included here as well
-                            scope: 'identify guilds email', 
-                        }).toString(),
+                        body: requestBody,
                     });
 
                     if (!tokenResponse.ok) {
