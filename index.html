@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Auto Role Bot Dashboard</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts - Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        /* Custom scrollbar for role selection */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #4a5568; /* gray-700 */
+            border-radius: 10px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #667eea; /* indigo-500 */
+            border-radius: 10px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #5a67d8; /* darker indigo */
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen flex flex-col">
+    <div id="app" class="flex-grow p-4 sm:p-8">
+        <!-- Content will be rendered here by JavaScript -->
+        <div class="min-h-screen flex items-center justify-center bg-gray-900 text-white">
+            <p>Loading dashboard...</p>
+        </div>
+    </div>
+
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+
+        // --- Global Variables (from Canvas environment or defaults) ---
+        // These are provided by the Canvas environment. Do NOT modify these lines.
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
+            apiKey: "AIzaSyC6J9qSLqfY_J52cNeOJHNeUaGE4ZZocjo",
+            authDomain: "simplerole2.firebaseapp.com",
+            projectId: "simplerole2",
+            storageBucket: "simplerole2.firebasestorage.app",
+            messagingSenderId: "107010786288",
+            appId: "1:107010786288:web:c250362e3b2d725ca25335",
+            measurementId: "G-1192M6TPSZ"
+        };
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        // --- Discord OAuth Credentials ---
+        // IMPORTANT: In a real production application, the client_secret should NEVER be exposed
+        // client-side. It should only be used on a secure backend server to exchange the OAuth code
+        // for an access token. For this example, it's included client-side as requested.
+        const DISCORD_CLIENT_ID = "1398619395554541569"; // Your Discord Application ID
+        const DISCORD_CLIENT_SECRET = "StKCtOS56S_Icn-797Paa7Fspm7OTf5H"; // Your Discord Client Secret
+        const DISCORD_REDIRECT_URI = window.location.origin; // Dynamically set to current origin (e.g., http://localhost:3000)
+
+        // --- Firebase Initialization ---
+        const firebaseApp = initializeApp(firebaseConfig);
+        const db = getFirestore(firebaseApp);
+        const auth = getAuth(firebaseApp);
+
+        // --- Global State Variables ---
+        let isAuthenticated = false;
+        let isLoadingAuth = true;
+        let discordAccessToken = null;
+        let discordUser = null;
+        let discordGuilds = [];
+        let firebaseUser = null;
+        let selectedGuildId = null;
+        let currentMessage = ''; // For success/error messages
+
+        // --- Utility Functions ---
+        function showMessage(message, type = 'success') {
+            currentMessage = message;
+            renderApp(); // Re-render to show message
+            // Optional: Hide message after a few seconds
+            setTimeout(() => {
+                currentMessage = '';
+                renderApp();
+            }, 5000);
+        }
+
+        function clearMessage() {
+            currentMessage = '';
+            renderApp();
+        }
+
+        // --- Discord OAuth Functions ---
+        const loginWithDiscord = () => {
+            const scope = encodeURIComponent('identify guilds'); // Request user info and guild list
+            const discordAuthUrl = `https://discord.com/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&redirect_uri=${encodeURIComponent(DISCORD_REDIRECT_URI)}&response_type=code&scope=${scope}`;
+            window.location.href = discordAuthUrl;
+        };
+
+        const logout = async () => {
+            isAuthenticated = false;
+            discordAccessToken = null;
+            discordUser = null;
+            discordGuilds = [];
+            selectedGuildId = null;
+            await auth.signOut(); // Sign out from Firebase
+            console.log("Logged out from Discord and Firebase.");
+            renderApp(); // Re-render to show login screen
+        };
+
+        // --- Firebase Authentication Listener ---
+        onAuthStateChanged(auth, async (user) => {
+            if (user) {
+                firebaseUser = user;
+                // If we have a Firebase user, we can consider auth ready for Firestore
+            } else {
+                firebaseUser = null;
+                // If no Firebase user, try anonymous sign-in if no custom token was provided
+                if (!initialAuthToken) {
+                    try {
+                        await signInAnonymously(auth);
+                        console.log("Signed in anonymously to Firebase.");
+                    } catch (error) {
+                        console.error("Error signing in anonymously:", error);
+                    }
+                }
+            }
+            isLoadingAuth = false; // Auth state is now known
+            renderApp(); // Initial render after auth state is determined
+        });
+
+        // Attempt custom token sign-in if available (for Canvas environment)
+        async function attemptCustomTokenSignIn() {
+            if (initialAuthToken && !firebaseUser) {
+                try {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                    console.log("Signed in with custom token.");
+                } catch (error) {
+                    console.error("Error signing in with custom token:", error);
+                }
+            }
+        }
+        attemptCustomTokenSignIn(); // Call immediately
+
+        // --- Discord OAuth Callback Handler ---
+        async function handleDiscordAuthCallback() {
+            const params = new URLSearchParams(window.location.search);
+            const code = params.get('code');
+
+            if (code) {
+                isLoadingAuth = true;
+                renderApp(); // Show loading state
+
+                try {
+                    // Exchange code for token
+                    const tokenResponse = await fetch('https://discord.com/api/oauth2/token', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                        },
+                        body: new URLSearchParams({
+                            client_id: DISCORD_CLIENT_ID,
+                            client_secret: DISCORD_CLIENT_SECRET,
+                            grant_type: 'authorization_code',
+                            code: code,
+                            redirect_uri: DISCORD_REDIRECT_URI,
+                            scope: 'identify guilds',
+                        }).toString(),
+                    });
+
+                    if (!tokenResponse.ok) {
+                        const errorData = await tokenResponse.json();
+                        console.error('Failed to exchange Discord code for token:', errorData);
+                        throw new Error('Failed to exchange Discord code for token');
+                    }
+
+                    const tokenData = await tokenResponse.json();
+                    discordAccessToken = tokenData.access_token;
+
+                    // Fetch Discord user info
+                    const userResponse = await fetch('https://discord.com/api/users/@me', {
+                        headers: {
+                            Authorization: `Bearer ${discordAccessToken}`,
+                        },
+                    });
+                    const userData = await userResponse.json();
+                    discordUser = userData;
+
+                    // Fetch Discord guilds (servers)
+                    const guildsResponse = await fetch('https://discord.com/api/users/@me/guilds', {
+                        headers: {
+                            Authorization: `Bearer ${discordAccessToken}`,
+                        },
+                    });
+                    const guildsData = await guildsResponse.json();
+                    // Filter for guilds where the user has administrator permission (bit 3 = 0x8)
+                    discordGuilds = guildsData.filter(guild => (guild.permissions & 0x8) === 0x8);
+
+                    isAuthenticated = true;
+
+                    // Clean up URL parameters
+                    window.history.replaceState({}, document.title, window.location.pathname);
+
+                    // Check for guild_id in URL for direct server settings access
+                    const guildIdFromUrl = params.get('guild_id');
+                    if (guildIdFromUrl) {
+                        selectedGuildId = guildIdFromUrl;
+                    }
+
+                } catch (error) {
+                    console.error('Discord OAuth error:', error);
+                    isAuthenticated = false;
+                    discordAccessToken = null;
+                    discordUser = null;
+                    discordGuilds = [];
+                    showMessage(`Authentication failed: ${error.message}`, 'error');
+                } finally {
+                    isLoadingAuth = false;
+                    renderApp(); // Re-render after auth process
+                }
+            } else {
+                isLoadingAuth = false; // No code, so not in auth flow, done loading auth
+                renderApp(); // Initial render if no code in URL
+            }
+        }
+
+        // --- Dashboard View Rendering ---
+        function renderDashboard() {
+            let guildListHtml = '';
+            if (discordGuilds.length > 0) {
+                guildListHtml = `
+                    <ul class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                        ${discordGuilds.map(guild => `
+                            <li class="bg-gray-800 rounded-lg shadow-lg overflow-hidden transition duration-300 ease-in-out transform hover:scale-105">
+                                <button data-guild-id="${guild.id}" class="w-full text-left p-6 flex items-center space-x-4 hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-75">
+                                    ${guild.icon ?
+                                        `<img src="https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png?size=64" alt="${guild.name} icon" class="w-16 h-16 rounded-full object-cover border-2 border-indigo-500">` :
+                                        `<div class="w-16 h-16 rounded-full bg-indigo-700 flex items-center justify-center text-xl font-bold text-white">
+                                            ${guild.name.charAt(0)}
+                                        </div>`
+                                    }
+                                    <span class="text-xl font-semibold text-gray-100">${guild.name}</span>
+                                </button>
+                            </li>
+                        `).join('')}
+                    </ul>
+                `;
+            } else {
+                guildListHtml = `
+                    <p class="text-gray-400 text-lg">No servers found where you have administrator permissions and the bot is present. Please invite the bot to your server and ensure you have admin rights.</p>
+                `;
+            }
+
+            const inviteLink = `https://discord.com/api/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&permissions=268437504&scope=bot`;
+
+            return `
+                <div class="max-w-4xl mx-auto">
+                    <h2 class="text-3xl font-bold mb-6 text-gray-200">Your Servers (Admin Access)</h2>
+                    ${currentMessage ? `
+                        <div class="bg-blue-500 text-white p-3 rounded-md mb-4 flex items-center justify-between">
+                            <span>${currentMessage}</span>
+                            <button onclick="clearMessage()" class="text-white font-bold text-xl">&times;</button>
+                        </div>
+                    ` : ''}
+                    ${guildListHtml}
+                    <div class="mt-8 p-6 bg-gray-800 rounded-lg shadow-lg">
+                        <h3 class="text-2xl font-bold text-gray-200 mb-4">Invite the Bot</h3>
+                        <p class="text-gray-300 mb-4">
+                            To add the bot to your server, use the following invite link. Make sure to grant it the necessary permissions (Manage Roles, Send Messages, Read Message History, View Channels).
+                        </p>
+                        <a href="${inviteLink}" target="_blank" rel="noopener noreferrer"
+                            class="inline-block bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg transition duration-300 ease-in-out transform hover:scale-105 shadow-lg">
+                            Invite Bot to Your Server
+                        </a>
+                        <p class="text-sm text-gray-500 mt-2">
+                            (Permissions: 268437504 includes: View Channels, Send Messages, Manage Roles)
+                        </p>
+                    </div>
+                </div>
+            `;
+        }
+
+        // --- Server Settings View Rendering and Logic ---
+        let serverSettingsState = {
+            roles: [],
+            channels: [],
+            selectedRoles: [],
+            selectedChannel: '',
+            welcomeMessage: 'Welcome {user} to {guild}! You are the {member_count}th member.',
+            loading: true,
+            error: '',
+            successMessage: '',
+            guildName: ''
+        };
+
+        async function fetchServerSettings(guildId) {
+            serverSettingsState.loading = true;
+            serverSettingsState.error = '';
+            serverSettingsState.successMessage = '';
+            renderApp(); // Show loading state
+
+            if (!discordAccessToken || !guildId || !firebaseUser) {
+                serverSettingsState.error = "Authentication or guild information missing.";
+                serverSettingsState.loading = false;
+                renderApp();
+                return;
+            }
+
+            try {
+                // Fetch guild details (name)
+                const guildResponse = await fetch(`https://discord.com/api/guilds/${guildId}`, {
+                    headers: { Authorization: `Bearer ${discordAccessToken}` },
+                });
+                if (!guildResponse.ok) throw new Error(`Failed to fetch guild details: ${guildResponse.statusText}`);
+                const guildData = await guildResponse.json();
+                serverSettingsState.guildName = guildData.name;
+
+                // Fetch roles
+                const rolesResponse = await fetch(`https://discord.com/api/guilds/${guildId}/roles`, {
+                    headers: { Authorization: `Bearer ${discordAccessToken}` },
+                });
+                if (!rolesResponse.ok) throw new Error(`Failed to fetch roles: ${rolesResponse.statusText}`);
+                const rolesData = await rolesResponse.json();
+                // Filter out @everyone role and sort by position (higher position = higher role)
+                serverSettingsState.roles = rolesData.filter(role => role.id !== guildId).sort((a, b) => b.position - a.position);
+
+                // Fetch channels
+                const channelsResponse = await fetch(`https://discord.com/api/guilds/${guildId}/channels`, {
+                    headers: { Authorization: `Bearer ${discordAccessToken}` },
+                });
+                if (!channelsResponse.ok) throw new Error(`Failed to fetch channels: ${channelsResponse.statusText}`);
+                const channelsData = await channelsResponse.json();
+                // Filter for text channels (type 0)
+                serverSettingsState.channels = channelsData.filter(channel => channel.type === 0);
+
+                // Fetch existing settings from Firestore
+                const guildSettingsRef = doc(db, `artifacts/${appId}/public/data/guild_settings`, String(guildId));
+                const docSnap = await getDoc(guildSettingsRef);
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    serverSettingsState.selectedRoles = data.auto_roles || [];
+                    serverSettingsState.selectedChannel = data.welcome_channel_id || '';
+                    serverSettingsState.welcomeMessage = data.welcome_message || 'Welcome {user} to {guild}! You are the {member_count}th member.';
+                } else {
+                    console.log("No existing settings for this guild. Using defaults.");
+                    serverSettingsState.selectedRoles = [];
+                    serverSettingsState.selectedChannel = '';
+                    serverSettingsState.welcomeMessage = 'Welcome {user} to {guild}! You are the {member_count}th member.';
+                }
+            } catch (err) {
+                console.error("Error fetching guild data or settings:", err);
+                serverSettingsState.error = `Failed to load server settings: ${err.message}`;
+            } finally {
+                serverSettingsState.loading = false;
+                renderApp(); // Re-render with fetched data or error
+            }
+        }
+
+        async function saveServerSettings() {
+            serverSettingsState.loading = true;
+            serverSettingsState.error = '';
+            serverSettingsState.successMessage = '';
+            renderApp(); // Show saving state
+
+            try {
+                const guildSettingsRef = doc(db, `artifacts/${appId}/public/data/guild_settings`, String(selectedGuildId));
+                await setDoc(guildSettingsRef, {
+                    auto_roles: serverSettingsState.selectedRoles,
+                    welcome_channel_id: serverSettingsState.selectedChannel,
+                    welcome_message: serverSettingsState.welcomeMessage,
+                    last_updated: new Date().toISOString(),
+                    updated_by_firebase_uid: firebaseUser.uid,
+                    updated_by_discord_id: discordUser ? discordUser.id : 'unknown', // Use Discord user ID if available
+                }, { merge: true });
+
+                serverSettingsState.successMessage = "Settings saved successfully!";
+            } catch (err) {
+                console.error("Error saving settings:", err);
+                serverSettingsState.error = `Failed to save settings: ${err.message}`;
+            } finally {
+                serverSettingsState.loading = false;
+                renderApp(); // Re-render with success/error message
+            }
+        }
+
+        function handleRoleChange(e) {
+            const { value, checked } = e.target;
+            const currentSelected = new Set(serverSettingsState.selectedRoles);
+
+            if (checked) {
+                if (currentSelected.size < 5) {
+                    currentSelected.add(value);
+                    serverSettingsState.error = ''; // Clear error if adding successfully
+                } else {
+                    serverSettingsState.error = "You can select a maximum of 5 auto roles.";
+                    e.target.checked = false; // Prevent checking if max reached
+                }
+            } else {
+                currentSelected.delete(value);
+                serverSettingsState.error = ''; // Clear error if removing
+            }
+            serverSettingsState.selectedRoles = Array.from(currentSelected);
+            serverSettingsState.successMessage = ''; // Clear success message on change
+            renderApp();
+        }
+
+        function handleChannelChange(e) {
+            serverSettingsState.selectedChannel = e.target.value;
+            serverSettingsState.successMessage = '';
+            serverSettingsState.error = '';
+            renderApp();
+        }
+
+        function handleMessageChange(e) {
+            serverSettingsState.welcomeMessage = e.target.value;
+            serverSettingsState.successMessage = '';
+            serverSettingsState.error = '';
+            renderApp();
+        }
+
+        function renderServerSettings() {
+            if (serverSettingsState.loading) {
+                return `
+                    <div class="min-h-screen flex items-center justify-center bg-gray-900 text-white">
+                        <p>Loading server settings...</p>
+                    </div>
+                `;
+            }
+
+            const rolesHtml = serverSettingsState.roles.map(role => `
+                <div class="flex items-center bg-gray-700 p-3 rounded-md">
+                    <input
+                        type="checkbox"
+                        id="role-${role.id}"
+                        value="${role.id}"
+                        ${serverSettingsState.selectedRoles.includes(role.id) ? 'checked' : ''}
+                        ${serverSettingsState.selectedRoles.length >= 5 && !serverSettingsState.selectedRoles.includes(role.id) ? 'disabled' : ''}
+                        onchange="handleRoleChange(event)"
+                        class="form-checkbox h-5 w-5 text-indigo-600 rounded focus:ring-indigo-500"
+                    />
+                    <label for="role-${role.id}" class="ml-3 text-gray-200 text-base cursor-pointer">
+                        ${role.name}
+                    </label>
+                </div>
+            `).join('');
+
+            const channelsHtml = serverSettingsState.channels.map(channel => `
+                <option value="${channel.id}" ${serverSettingsState.selectedChannel === channel.id ? 'selected' : ''}>
+                    ${channel.name}
+                </option>
+            `).join('');
+
+            return `
+                <div class="max-w-4xl mx-auto bg-gray-800 p-6 sm:p-8 rounded-lg shadow-xl">
+                    <h2 class="text-3xl font-bold mb-6 text-indigo-400">
+                        Settings for ${serverSettingsState.guildName || 'Selected Server'}
+                    </h2>
+
+                    ${serverSettingsState.error ? `
+                        <div class="bg-red-500 text-white p-3 rounded-md mb-4 flex items-center justify-between">
+                            <span>${serverSettingsState.error}</span>
+                            <button onclick="serverSettingsState.error = ''; renderApp();" class="text-white font-bold text-xl">&times;</button>
+                        </div>
+                    ` : ''}
+                    ${serverSettingsState.successMessage ? `
+                        <div class="bg-green-500 text-white p-3 rounded-md mb-4 flex items-center justify-between">
+                            <span>${serverSettingsState.successMessage}</span>
+                            <button onclick="serverSettingsState.successMessage = ''; renderApp();" class="text-white font-bold text-xl">&times;</button>
+                        </div>
+                    ` : ''}
+
+                    <div class="mb-6">
+                        <label class="block text-gray-300 text-lg font-semibold mb-2">
+                            Select Auto Roles (Max 5):
+                        </label>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
+                            ${rolesHtml}
+                        </div>
+                        <p class="text-sm text-gray-400 mt-2">
+                            Currently selected: ${serverSettingsState.selectedRoles.length} / 5
+                        </p>
+                    </div>
+
+                    <div class="mb-6">
+                        <label for="welcome-channel" class="block text-gray-300 text-lg font-semibold mb-2">
+                            Welcome Message Channel:
+                        </label>
+                        <select
+                            id="welcome-channel"
+                            onchange="handleChannelChange(event)"
+                            class="w-full p-3 rounded-md bg-gray-700 border border-gray-600 text-gray-200 focus:ring-indigo-500 focus:border-indigo-500"
+                        >
+                            <option value="">-- Select a channel --</option>
+                            ${channelsHtml}
+                        </select>
+                    </div>
+
+                    <div class="mb-6">
+                        <label for="welcome-message" class="block text-gray-300 text-lg font-semibold mb-2">
+                            Customize Welcome Message:
+                        </label>
+                        <textarea
+                            id="welcome-message"
+                            oninput="handleMessageChange(event)"
+                            rows="5"
+                            class="w-full p-3 rounded-md bg-gray-700 border border-gray-600 text-gray-200 focus:ring-indigo-500 focus:border-indigo-500 resize-y"
+                            placeholder="Welcome {user} to {guild}! You are the {member_count}th member."
+                        >${serverSettingsState.welcomeMessage}</textarea>
+                        <p class="text-sm text-gray-400 mt-2">
+                            Use placeholders: <code class="bg-gray-700 px-1 py-0.5 rounded text-indigo-300">{' {user} '}</code>,
+                            <code class="bg-gray-700 px-1 py-0.5 rounded text-indigo-300">{' {guild} '}</code>,
+                            <code class="bg-gray-700 px-1 py-0.5 rounded text-indigo-300">{' {member_count} '}</code>
+                        </p>
+                    </div>
+
+                    <div class="flex justify-end space-x-4 mt-8">
+                        <button onclick="selectedGuildId = null; renderApp();"
+                            class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-3 px-6 rounded-lg transition duration-300 ease-in-out shadow-md">
+                            Back to Servers
+                        </button>
+                        <button onclick="saveServerSettings()"
+                            ${serverSettingsState.loading ? 'disabled' : ''}
+                            class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-lg transition duration-300 ease-in-out transform hover:scale-105 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed">
+                            ${serverSettingsState.loading ? 'Saving...' : 'Save Settings'}
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+
+        // --- Main Render Function ---
+        function renderApp() {
+            const appDiv = document.getElementById('app');
+            let contentHtml = '';
+
+            if (isLoadingAuth) {
+                contentHtml = `
+                    <div class="min-h-screen flex items-center justify-center bg-gray-900 text-white">
+                        <p>Loading authentication...</p>
+                    </div>
+                `;
+            } else if (!isAuthenticated) {
+                contentHtml = `
+                    <div class="min-h-screen flex flex-col items-center justify-center bg-gray-900 text-white p-4">
+                        <div class="bg-gray-800 p-8 rounded-lg shadow-xl text-center max-w-md w-full">
+                            <h1 class="text-3xl font-bold mb-6 text-indigo-400">Welcome to Auto Role Bot Dashboard</h1>
+                            <p class="text-gray-300 mb-8">Please log in with Discord to manage your server's auto-role settings.</p>
+                            <button id="loginButton"
+                                class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-lg transition duration-300 ease-in-out transform hover:scale-105 shadow-lg">
+                                <svg class="inline-block w-5 h-5 mr-2 -mt-1" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M10 0C4.477 0 0 4.477 0 10c0 4.991 3.657 9.128 8.438 9.879l.073.01c.402.072.547-.174.547-.386v-1.517c-3.148.682-3.812-1.517-3.812-1.517-.514-1.303-1.25-1.65-1.25-1.65-1.02-.696.077-.682.077-.682 1.12.077 1.708 1.15 1.708 1.15.992 1.708 2.607 1.216 3.23.929.1-.72.386-1.216.703-1.496-2.47-.282-5.06-1.236-5.06-5.504 0-1.216.43-2.208 1.15-2.986-.1-.282-.47-.1.43-2.95 0 0 .929-.318 3.04.929.886-.248 1.83-.372 2.77-.372.94 0 1.884.124 2.77.372 2.11-1.247 3.04-.929 3.04-.929.9.077.53.182.43 2.95.72.778 1.15 1.77 1.15 2.986 0 4.28-2.59 5.218-5.06 5.504.386.33.703.992.703 2.008v2.95c0 .212.145.458.547.386l.073-.01C16.343 19.128 20 14.991 20 10c0-5.523-4.477-10-10-10z" clip-rule="evenodd" /></svg>
+                                Login with Discord
+                            </button>
+                        </div>
+                    </div>
+                `;
+            } else {
+                // Render header
+                const headerHtml = `
+                    <header class="flex flex-col sm:flex-row justify-between items-center mb-8 pb-4 border-b border-gray-700">
+                        <h1 class="text-4xl font-extrabold text-indigo-400 mb-4 sm:mb-0">
+                            Auto Role Bot Dashboard
+                        </h1>
+                        <div class="flex items-center">
+                            ${discordUser ? `
+                                <span class="text-gray-300 mr-4 text-lg">
+                                    Welcome, ${discordUser.username}#${discordUser.discriminator}
+                                </span>
+                            ` : ''}
+                            <button id="logoutButton"
+                                class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition duration-300 ease-in-out shadow-md">
+                                Logout
+                            </button>
+                        </div>
+                    </header>
+                `;
+
+                if (selectedGuildId) {
+                    contentHtml = headerHtml + renderServerSettings();
+                } else {
+                    contentHtml = headerHtml + renderDashboard();
+                }
+            }
+
+            appDiv.innerHTML = contentHtml;
+
+            // Attach event listeners after rendering
+            if (!isLoadingAuth && !isAuthenticated) {
+                document.getElementById('loginButton')?.addEventListener('click', loginWithDiscord);
+            } else if (isAuthenticated) {
+                document.getElementById('logoutButton')?.addEventListener('click', logout);
+                if (!selectedGuildId) {
+                    document.querySelectorAll('[data-guild-id]').forEach(button => {
+                        button.addEventListener('click', (e) => {
+                            selectedGuildId = e.currentTarget.dataset.guildId;
+                            fetchServerSettings(selectedGuildId); // Fetch data for the selected guild
+                        });
+                    });
+                } else {
+                    // Update select element value manually for welcome channel as innerHTML replaces it
+                    const channelSelect = document.getElementById('welcome-channel');
+                    if (channelSelect) {
+                        channelSelect.value = serverSettingsState.selectedChannel;
+                    }
+                }
+            }
+
+            // Display Firebase User ID at the bottom
+            const userIdDisplay = document.createElement('p');
+            userIdDisplay.className = 'text-center text-gray-500 text-sm mt-8';
+            userIdDisplay.textContent = `User ID: ${firebaseUser?.uid || 'Not authenticated'}`;
+            appDiv.appendChild(userIdDisplay);
+        }
+
+        // --- Initial Call to handle Discord Auth and render the app ---
+        window.onload = handleDiscordAuthCallback;
+    </script>
+</body>
+</html>
