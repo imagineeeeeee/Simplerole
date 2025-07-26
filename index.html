@@ -141,29 +141,16 @@
                 isAuthenticated = true; // Firebase user exists, so consider authenticated
 
                 // If Discord details are not yet loaded (e.g., page refresh after Firebase auth)
-                if (!discordUser && discordAccessToken) {
-                    try {
-                        // Attempt to re-fetch Discord user and guilds using existing access token
-                        const userResponse = await fetch('https://discord.com/api/users/@me', {
-                            headers: { Authorization: `Bearer ${discordAccessToken}` },
-                        });
-                        const userData = await userResponse.json();
-                        discordUser = userData;
-
-                        const guildsResponse = await fetch('https://discord.com/api/users/@me/guilds', {
-                            headers: { Authorization: `Bearer ${discordAccessToken}` },
-                        });
-                        const guildsData = await guildsResponse.json();
-                        discordGuilds = guildsData.filter(guild => (guild.permissions & 0x8) === 0x8);
-                    } catch (error) {
-                        console.error("Error re-fetching Discord data on Firebase auth state change:", error);
-                        // If re-fetching fails, clear Discord specific data
-                        discordAccessToken = null;
-                        discordUser = null;
-                        discordGuilds = [];
-                        isAuthenticated = false; // Re-authenticate Discord if its data is lost
-                        showMessage("Failed to retrieve Discord data. Please log in with Discord again.", 'error');
-                    }
+                // and the user has a Discord provider linked
+                if (!discordUser && firebaseUser.providerData.some(p => p.providerId === 'discord.com')) {
+                    // Attempt to re-fetch Discord access token from Firebase user's provider data
+                    // This is a simplified approach; a full solution might involve refreshing tokens
+                    // or storing the Discord access token in Firestore after initial login.
+                    // For now, we'll prompt re-login if Discord data isn't immediately available.
+                    console.log("Firebase user is Discord-linked, but Discord data not fully loaded. Re-logging in Discord might be needed.");
+                    // We can't reliably get the Discord access token from firebaseUser.providerData
+                    // without a server-side component or storing it. So, we'll rely on the full
+                    // Discord OAuth callback to populate discordAccessToken.
                 }
             } else {
                 firebaseUser = null;
@@ -212,9 +199,11 @@
 
                     const tokenData = await tokenResponse.json();
                     discordAccessToken = tokenData.access_token;
+                    const discordIdToken = tokenData.id_token; // Discord might provide an ID token
 
                     // 2. Sign in to Firebase with Discord Access Token
-                    const credential = OAuthProvider.credentialWithToken('discord.com', discordAccessToken);
+                    // Corrected: Use OAuthProvider.credential() for creating the credential
+                    const credential = OAuthProvider.credential('discord.com', discordAccessToken, discordIdToken);
                     const firebaseAuthResult = await signInWithCredential(auth, credential);
                     firebaseUser = firebaseAuthResult.user;
                     console.log("Firebase user signed in/linked via Discord:", firebaseUser.uid);
