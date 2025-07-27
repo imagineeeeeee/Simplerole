@@ -384,7 +384,7 @@
 
             try {
                 // Fetch guild details (name) using BOT TOKEN via Backend Proxy
-                const guildDetailsResponse = await fetch(`${BACKEND_URL}/api/guilds/${guildId}/details`, {
+                const guildDetailsResponse = await fetch(`${BACKEND_URL}/api/v10/guilds/${guildId}/details`, {
                     method: 'GET',
                     headers: {
                         'Content-Type': 'application/json'
