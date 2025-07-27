@@ -114,7 +114,7 @@
                 // Perform Discord OAuth redirect
                 // Added 'email' scope to the request
                 const scope = encodeURIComponent('identify guilds email'); 
-                const discordAuthUrl = `https://discord.com/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&redirect_url=${encodeURIComponent(DISCORD_REDIRECT_URI)}&response_type=code&scope=${scope}`;
+                const discordAuthUrl = `https://discord.com/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&redirect_uri=${encodeURIComponent(DISCORD_REDIRECT_URI)}&response_type=code&scope=${scope}`;
                 window.location.href = discordAuthUrl;
 
             } catch (error) {
@@ -200,7 +200,7 @@
                         client_secret: DISCORD_CLIENT_SECRET,
                         grant_type: 'authorization_code',
                         code: code,
-                        redirect_uri: DISCORD_REDIRECT_URI,
+                        redirect_uri: DISCORD_REDIRECT_URI, // Kept as redirect_uri as per Discord OAuth2 spec
                         scope: 'identify guilds email', 
                     }).toString();
 
@@ -355,6 +355,71 @@
             successMessage: '',
             guildName: ''
         };
+
+        // These functions need to be globally accessible or attached after rendering
+        window.handleRoleChange = function(e) {
+            const { value, checked } = e.target;
+            const currentSelected = new Set(serverSettingsState.selectedRoles);
+
+            if (checked) {
+                if (currentSelected.size < 5) {
+                    currentSelected.add(value);
+                    serverSettingsState.error = ''; // Clear error if adding successfully
+                } else {
+                    serverSettingsState.error = "You can select a maximum of 5 auto roles.";
+                    e.target.checked = false; // Prevent checking if max reached
+                }
+            } else {
+                currentSelected.delete(value);
+                serverSettingsState.error = ''; // Clear error if removing
+            }
+            serverSettingsState.selectedRoles = Array.from(currentSelected);
+            serverSettingsState.successMessage = ''; // Clear success message on change
+            renderApp();
+        };
+
+        window.handleChannelChange = function(e) {
+            serverSettingsState.selectedChannel = e.target.value;
+            serverSettingsState.successMessage = '';
+            serverSettingsState.error = '';
+            renderApp();
+        };
+
+        window.handleMessageChange = function(e) {
+            serverSettingsState.welcomeMessage = e.target.value;
+            serverSettingsState.successMessage = '';
+            serverSettingsState.error = '';
+            renderApp();
+        };
+
+        window.saveServerSettings = async function() {
+            serverSettingsState.loading = true;
+            serverSettingsState.error = '';
+            serverSettingsState.successMessage = '';
+            renderApp(); // Show saving state
+
+            try {
+                const guildSettingsRef = doc(db, `artifacts/${appId}/public/data/guild_settings`, String(selectedGuildId));
+                await setDoc(guildSettingsRef, {
+                    auto_roles: serverSettingsState.selectedRoles,
+                    welcome_channel_id: serverSettingsState.selectedChannel,
+                    welcome_message: serverSettingsState.welcomeMessage,
+                    last_updated: new Date().toISOString(),
+                    updated_by_firebase_uid: firebaseUser.uid,
+                    updated_by_discord_id: discordUser ? discordUser.id : 'unknown', // Use Discord user ID if available
+                    updated_by_discord_email: discordUser ? discordUser.email : 'unknown', // NEW: Store Discord user email
+                }, { merge: true });
+
+                serverSettingsState.successMessage = "Settings saved successfully!";
+            } catch (err) {
+                console.error("Error saving settings:", err);
+                serverSettingsState.error = `Failed to save settings: ${err.message}`;
+            } finally {
+                serverSettingsState.loading = false;
+                renderApp(); // Re-render with success/error message
+            }
+        };
+
 
         async function fetchServerSettings(guildId) {
             serverSettingsState.loading = true;
@@ -519,6 +584,7 @@
                 `;
             }
 
+            // Generate HTML for roles
             const rolesHtml = serverSettingsState.roles.map(role => `
                 <div class="flex items-center bg-gray-700 p-3 rounded-md">
                     <input
@@ -527,8 +593,7 @@
                         value="${role.id}"
                         ${serverSettingsState.selectedRoles.includes(role.id) ? 'checked' : ''}
                         ${serverSettingsState.selectedRoles.length >= 5 && !serverSettingsState.selectedRoles.includes(role.id) ? 'disabled' : ''}
-                        onchange="handleRoleChange(event)"
-                        class="form-checkbox h-5 w-5 text-indigo-600 rounded focus:ring-indigo-500"
+                        data-role-id="${role.id}" class="form-checkbox h-5 w-5 text-indigo-600 rounded focus:ring-indigo-500"
                     />
                     <label for="role-${role.id}" class="ml-3 text-gray-200 text-base cursor-pointer">
                         ${role.name}
@@ -536,6 +601,7 @@
                 </div>
             `).join('');
 
+            // Generate HTML for channels
             const channelsHtml = serverSettingsState.channels.map(channel => `
                 <option value="${channel.id}" ${serverSettingsState.selectedChannel === channel.id ? 'selected' : ''}>
                     ${channel.name}
@@ -551,13 +617,13 @@
                     ${serverSettingsState.error ? `
                         <div class="bg-red-500 text-white p-3 rounded-md mb-4 flex items-center justify-between">
                             <span>${serverSettingsState.error}</span>
-                            <button onclick="serverSettingsState.error = ''; renderApp();" class="text-white font-bold text-xl">&times;</button>
+                            <button id="clearErrorMessage" class="text-white font-bold text-xl">&times;</button>
                         </div>
                     ` : ''}
                     ${serverSettingsState.successMessage ? `
                         <div class="bg-green-500 text-white p-3 rounded-md mb-4 flex items-center justify-between">
                             <span>${serverSettingsState.successMessage}</span>
-                            <button onclick="serverSettingsState.successMessage = ''; renderApp();" class="text-white font-bold text-xl">&times;</button>
+                            <button id="clearSuccessMessage" class="text-white font-bold text-xl">&times;</button>
                         </div>
                     ` : ''}
 
@@ -579,7 +645,6 @@
                         </label>
                         <select
                             id="welcome-channel"
-                            onchange="handleChannelChange(event)"
                             class="w-full p-3 rounded-md bg-gray-700 border border-gray-600 text-gray-200 focus:ring-indigo-500 focus:border-indigo-500"
                         >
                             <option value="">-- Select a channel --</option>
@@ -593,7 +658,6 @@
                         </label>
                         <textarea
                             id="welcome-message"
-                            oninput="handleMessageChange(event)"
                             rows="5"
                             class="w-full p-3 rounded-md bg-gray-700 border border-gray-600 text-gray-200 focus:ring-indigo-500 focus:border-indigo-500 resize-y"
                             placeholder="Welcome {user} to {guild}! You are the {member_count}th member."
@@ -606,11 +670,11 @@
                     </div>
 
                     <div class="flex justify-end space-x-4 mt-8">
-                        <button onclick="selectedGuildId = null; renderApp();"
+                        <button id="backToServersButton"
                             class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-3 px-6 rounded-lg transition duration-300 ease-in-out shadow-md">
                             Back to Servers
                         </button>
-                        <button onclick="saveServerSettings()"
+                        <button id="saveSettingsButton"
                             ${serverSettingsState.loading ? 'disabled' : ''}
                             class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-lg transition duration-300 ease-in-out transform hover:scale-105 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed">
                             ${serverSettingsState.loading ? 'Saving...' : 'Save Settings'}
@@ -690,6 +754,26 @@
                         });
                     });
                 } else {
+                    // Attach event listeners for elements in server settings view
+                    document.querySelectorAll('input[type="checkbox"][data-role-id]').forEach(checkbox => {
+                        checkbox.addEventListener('change', window.handleRoleChange);
+                    });
+                    document.getElementById('welcome-channel')?.addEventListener('change', window.handleChannelChange);
+                    document.getElementById('welcome-message')?.addEventListener('input', window.handleMessageChange);
+                    document.getElementById('backToServersButton')?.addEventListener('click', () => {
+                        selectedGuildId = null;
+                        renderApp();
+                    });
+                    document.getElementById('saveSettingsButton')?.addEventListener('click', window.saveServerSettings);
+                    document.getElementById('clearErrorMessage')?.addEventListener('click', () => {
+                        serverSettingsState.error = '';
+                        renderApp();
+                    });
+                    document.getElementById('clearSuccessMessage')?.addEventListener('click', () => {
+                        serverSettingsState.successMessage = '';
+                        renderApp();
+                    });
+
                     // Update select element value manually for welcome channel as innerHTML replaces it
                     const channelSelect = document.getElementById('welcome-channel');
                     if (channelSelect) {
